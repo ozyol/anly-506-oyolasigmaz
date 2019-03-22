@@ -1,0 +1,234 @@
+---
+title: "oyolasigmaz510EDA"
+author: "Ozan Yolasigmaz"
+date: "2/21/2019"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(car)
+library(moments)
+```
+
+# Questions
+
+In the gapminder data set, we have the short history of the last 220 years of the world in terms of populations, incomes, and life expectancies of the countries and regions of the world. Using this data set, we will try to investigate the effects of colonization on the colonized and colonizer countries. In order to make the results digestible, we will focus on one of the late colonizers of Europe, Belgium. Some of the questions we will try to answer are as follows:
+
+* How has the population of the colonizer and colonized countries changed before and after occupations? Before and after independence?
+* How has the colonization assisted the total income of a colonizer country, and did this have adverse affects on the colonized countries?
+* Can we detect any signal for changing life expectancies in colonies?
+
+# Data
+
+The data set we have contains the following columns:
+
+1. Country - factor - country name
+2. Year - integer - year of survey/data
+3. life - double - average life expectancy
+4. population - factor -  estimated or measured population size
+5. income - double - average income per person, without units
+6. region - factor - region the country belongs to
+
+We will need to standardize the population column and convert it to integers. 
+
+```{r reading, echo=TRUE}
+# read data set
+df <- read.csv("../data/gapminder.csv")
+
+# standardize the population column
+df$population <- as.integer(gsub("\\.", "", gsub(",", "", as.character(df$population))))
+
+# view top rows of the data set
+head(df)
+```
+
+Let's find out the distributions for year, life, population, and income variables.
+
+```{r yearDist}
+# group the data by year, and count the number of distinct countries in each year
+df %>%
+  group_by(Year) %>%
+  summarize(cnt = n_distinct(Country)) %>%
+  ggplot(mapping = aes(x = Year, y = cnt)) + 
+  geom_point() +
+  ggtitle("Year vs count of countries") + 
+  xlab("Year") + ylab("count of countries")
+```
+
+And now we want to find the countries that has had data for the longest. 
+
+```{r rowsByCountry}
+df %>%
+  group_by(Country) %>%
+  summarise(cnt = n_distinct(Year)) %>%
+  arrange(desc(cnt))
+```
+
+Before going further, we want to find how many missing values are there in the data. Only population and income variables are missing for some of the data.
+
+```{r missingValuesPopulation}
+df %>%
+  filter(!is.na(population)) %>%
+  group_by(Year) %>%
+  count()
+```
+
+```{r missingValuesIncome}
+df %>%
+  filter(!is.na(income)) %>%
+  group_by(Year) %>%
+  count()
+```
+
+From the two tables above, we see that population counts are only happening at years that are multiples of 10 before 1950, and that income values are missing for some countries, rather than some years.
+
+Going forward, we will use only the years that are multiples of 10, in order to have a nonbiased distribution that goes as far back as possible.
+
+```{r filterDF}
+df2 <- df %>% filter(Year %% 10 == 0)
+head(df2)
+```
+
+```{r df2missingPop}
+df2 %>% filter(is.na(population)) %>% group_by(Country) %>% count()
+```
+
+We see that only Netherlands Antilles and Taiwan are missing population values now.
+
+```{r df2missingIncome}
+df2 %>% filter(is.na(income))  %>% group_by(Country) %>% count()
+```
+
+And only certain countries, mostly Island states and smaller colonies, are missing their income values. This will not affect the questions we are trying to answer.
+
+# Exploration
+
+Let's start by comparing population, life expectancy, and income in different regions through time.
+
+```{r populationByRegion}
+# creating summary stats for each region
+# For life expectancy, we take a weighted mean using the countries' populations.
+regionSummary <- df2 %>%
+  filter(!is.na(population) & !is.na(income)) %>%
+  group_by(region, Year) %>%
+  summarise(total_pop = sum(population),
+            total_income = sum(income),
+            avg_life = weighted.mean(life, population))
+
+# Plotting populations
+ggplot(data = regionSummary, mapping = aes(x = Year, y = total_pop, colour = region)) + 
+  geom_line() +
+  ggtitle("Total population of regions through years") + 
+  xlab("Year") + ylab("Total population")
+
+```
+
+```{r incomeByRegion}
+ggplot(data = regionSummary, mapping = aes(x = Year, y = total_income, colour = region)) + 
+  geom_line() +
+  ggtitle("Total income of regions through years") + 
+  xlab("Year") + ylab("Total income")
+```
+
+```{r lifeByRegion}
+ggplot(data = regionSummary, mapping = aes(x = Year, y = avg_life, colour = region)) + 
+  geom_line() +
+  ggtitle("Average life expectancy of regions through years") + 
+  xlab("Year") + ylab("Average life expectancy")
+```
+
+From the above plots, we can already see that Sub-Saharan Africa has been suffering starting mid 1800s, and the effects are continuing to this day.
+
+Now, we can start focusing on Belgium and its colonies:
+
+
+```{r belgium1}
+df2 %>% filter(Country %in% c("Belgium", "Congo, Dem. Rep.", "Congo, Rep.","Rwanda")) %>%
+  ggplot(mapping = aes(x = Year, y = income, colour = Country)) + 
+  geom_line() +
+  ggtitle("Incomes of Belgium and its colonies through years") + 
+  xlab("Year") + ylab("Income")
+```
+
+In order to understand the effects of colonization, we need to take into consideration when Congo and Rwanda were colonies of Belgium. 
+
+Congo Free State was established in 1885, even though the colonization has started earlier, and the Belgian Congo was created in 1908. In 1960 the independence movement got much stronger, and Congo was independent by 1965.
+
+Belgium occupied Rwanda-Urundi that was part of German East Africe starting at 1916, and it was under Belge control until 1962.
+
+Let's place markers in our plots indicating these dates.
+
+
+```{r belgium2}
+df2 %>% filter(Country %in% c("Belgium", "Congo, Dem. Rep.", "Congo, Rep.","Rwanda")) %>%
+  ggplot(mapping = aes(x = Year, y = income, colour = Country)) + 
+  geom_line() +
+  ggtitle("Incomes of Belgium and its colonies through years") + 
+  xlab("Year") + ylab("Income") + 
+  geom_vline(xintercept=1885, colour="red") + 
+  geom_text(aes(x=1881, label="Belgium occupation of Congo", y=20000), colour="red", angle=90) +
+  geom_vline(xintercept=1916, colour="red") + 
+  geom_text(aes(x=1912, label="Belgium occupation of Rwanda", y=20000), colour="red", angle=90) + 
+  geom_vline(xintercept=1965, colour="blue") + 
+  geom_text(aes(x=1961, label="Independence from Belgium", y=20000), colour="blue", angle=90)
+
+```
+
+
+
+```{r belgium3}
+df2 %>% filter(Country %in% c("Belgium", "Congo, Dem. Rep.", "Congo, Rep.","Rwanda")) %>%
+  ggplot(mapping = aes(x = Year, y = life, colour = Country)) + 
+  geom_line() +
+  ggtitle("Life expectancies of Belgium and its colonies through years") + 
+  xlab("Year") + ylab("life") + 
+  geom_vline(xintercept=1885, colour="red") + 
+  geom_text(aes(x=1881, label="Belgium occupation of Congo", y=40), colour="red", angle=90) +
+  geom_vline(xintercept=1916, colour="red") + 
+  geom_text(aes(x=1912, label="Belgium occupation of Rwanda", y=40), colour="red", angle=90) + 
+  geom_vline(xintercept=1965, colour="blue") + 
+  geom_text(aes(x=1961, label="Independence from Belgium", y=40), colour="blue", angle=90)
+
+```
+
+```{r belgium4}
+df2 %>% filter(Country %in% c("Belgium", "Congo, Dem. Rep.", "Congo, Rep.","Rwanda")) %>%
+  ggplot(mapping = aes(x = Year, y = population, colour = Country)) + 
+  geom_line() +
+  ggtitle("Populations of Belgium and its colonies through years") + 
+  xlab("Year") + ylab("population") + 
+  geom_vline(xintercept=1885, colour="red") + 
+  geom_text(aes(x=1881, label="Belgium occupation of Congo", y=20000000), colour="red", angle=90) +
+  geom_vline(xintercept=1916, colour="red") + 
+  geom_text(aes(x=1912, label="Belgium occupation of Rwanda", y=20000000), colour="red", angle=90) + 
+  geom_vline(xintercept=1965, colour="blue") + 
+  geom_text(aes(x=1961, label="Independence from Belgium", y=20000000), colour="blue", angle=90)
+
+```
+
+# Findings
+
+## Effects of colonization on Belgium and its colonies
+### Income
+
+We see that the income levels of the colonies have been kept low during the years of colonization, and before the indepence movements come, we see a drastic increase in wealth and income of Belgium, which helps it recover from the losses of the second world war. However, after independence, we see that Democratic Republic of Congo has lost its income that was starting to recover. This could be attributed, among many other factors, to the effects of colonization and the social unrests that have continued after independence.
+
+### Life expectancy
+
+Even during the colonization, we see that the Belge life expectancy has been moving up, due to the advancements in science and technology. However, this translates to its colonies after a lag of more than 50 years. The life expectancies in the colonies start increasing before 1950s, and not before, when the Belge had the technological capability of helping, but chose not to.
+
+### Population
+
+We see a small but steady increase in the populations before independence, but the real boost comes after the second world war, and when the independence movements are gaining traction. The most drastic change happens after the independence of Congo, and we see that the population starts increasing exponentially, which was kept under control during the years of colonization.
+
+
+### Overall
+
+In this study, we tried to analyze the effects of colonization from a very simple data set of populations, incomes, and life expectancies of countries of the world. Even though the patterns we have observed are not enough to make concrete deductions, we can see the adverse affects of colonization, especially in the modern day Democratic Republic of Congo, which has not seen the light of day from civil unrests and occupations even before the coming of the Belges. We can repeat this analysis with more colonizer/colonized pairs to establish methodologies for studying populations and incomes.

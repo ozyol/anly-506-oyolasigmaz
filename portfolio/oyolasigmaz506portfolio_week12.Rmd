@@ -1,0 +1,199 @@
+---
+title: "oyolasigmaz506portfolio_week12"
+author: "Ozan Yolasigmaz"
+date: "3/21/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(cluster)
+library(factoextra)
+library(gridExtra)
+```
+
+## Purpose: K-means Cluster Analysis https://uc-r.github.io/kmeans_clustering
+
+### Data preparation
+
+```{r dataprep}
+# read data
+df <- USArrests
+# omit NA values
+df <- na.omit(df)
+# scale data
+df <- scale(df)
+# and view example rows
+head(df)
+```
+
+Different distance metrics we can use:
+Euclidean -- what we consider as distance living on Earth, L2 norm
+Manhattan -- adding together all the dimensions, L1 norm
+
+Useful functions:
+
+get_dist() # get distance between two rows of a matrix
+fviz_dist() # visualize distance matrix
+
+The distance matrix for our data frame looks like the follows:
+```{r distances}
+distance <- get_dist(df)
+fviz_dist(distance, gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
+```
+
+### K-means clustering
+
+In k-means clustering, our goal is to find k distinct center points so that when we consider the neighborhoods around these points, we have minimum total within-cluster sum of square.
+
+To do so, we start with k arbitrary points, assign points to the closest one as their center, and move the centers through iteration until we have the minimum total within sum of square.
+
+kmeans() # we will be using this function to run k-means clustering.
+
+```{r first_kmeans}
+k2 <- kmeans(df, centers = 2, nstart = 25)
+str(k2)
+```
+
+Here cluster is giving us which cluster each state belongs. We can now look at our results in more detail:
+
+```{r first_kmeans_results}
+k2
+```
+
+fviz_cluster() # will help us visualize these clusters
+
+```{r first_kmeans_viz}
+fviz_cluster(k2, data = df)
+```
+
+Since we do not know the optimal number for k yet, let's run k-means for a few different values of k.
+
+```{r kmeans_multiple}
+k3 <- kmeans(df, centers = 3, nstart = 25)
+k4 <- kmeans(df, centers = 4, nstart = 25)
+k5 <- kmeans(df, centers = 5, nstart = 25)
+
+# plots to compare
+p1 <- fviz_cluster(k2, geom = "point", data = df) + ggtitle("k = 2")
+p2 <- fviz_cluster(k3, geom = "point",  data = df) + ggtitle("k = 3")
+p3 <- fviz_cluster(k4, geom = "point",  data = df) + ggtitle("k = 4")
+p4 <- fviz_cluster(k5, geom = "point",  data = df) + ggtitle("k = 5")
+
+grid.arrange(p1, p2, p3, p4, nrow = 2)
+```
+
+Now, we can focus on finding the optimal value for k.
+
+### Determining Optimal Clusters
+
+#### Elbow method
+
+The goal with the elbow method is to find the value of k for which we are not lowering the total within-cluster sum of square (wss), or if it exists, the k for which it increases.
+
+To do so, we need to define a function that allows us to compute wss easily:
+
+```{r wss_function}
+wss <- function(k) {
+  kmeans(df, k, nstart = 10 )$tot.withinss
+}
+```
+
+And now we can utilize this function to draw the elbow diagram:
+
+```{r elbow}
+# in order to reproduce our work in the future, we set the seed value
+set.seed(100)
+
+# we'll test for k from 1 to 15
+k.values <- 1:15
+
+# calculate wss values for each
+wss_values <- map_dbl(k.values, wss)
+
+plot(k.values, wss_values,
+       type="b", pch = 19, frame = FALSE, 
+       xlab="Number of clusters K",
+       ylab="Total within-clusters sum of squares")
+```
+
+Instead of running all this, we could also use the predefined function:
+fviz_nbclust() # produces the elbow graph
+
+```{r elbow_2}
+fviz_nbclust(df, kmeans, method="wss")
+```
+
+#### Average Silhouette Method
+
+This is another method for finding the optimal number of clusters, by measuring the quality of each cluster. To do so, we need the following function:
+
+silhoutte() # calculates silhoutte for given clustering
+
+First, we define a function to calculate average silhoute values:
+
+```{r silhoutte_function}
+avg_sil <- function(k) {
+  km.res <- kmeans(df, centers = k, nstart = 25)
+  ss <- silhouette(km.res$cluster, dist(df))
+  mean(ss[, 3])
+}
+```
+
+And now, we can plot the average silhoutte values:
+
+```{r silhoutte_calc}
+# we'll try it for k between 2 and 15
+k.values <- 2:15
+
+# calculate average silhoutte values for each
+avg_sil_values <- map_dbl(k.values, avg_sil)
+
+# plot
+plot(k.values, avg_sil_values,
+       type = "b", pch = 19, frame = FALSE, 
+       xlab = "Number of clusters K",
+       ylab = "Average Silhouettes")
+```
+
+#### Gap Statistic Method
+
+The last method we'll try is gap statistic method, and it calculates the total intracluster variation for a given clustering, and compares that to their expected values under null reference distribution of the data.
+
+```{r gap_statistic}
+gap_stat <- clusGap(df, FUN = kmeans, nstart = 25,
+                    K.max = 10, B = 50)
+# Print the result
+print(gap_stat, method = "firstmax")
+```
+
+The following function allows us to visualize the results of this method:
+fviz_gap_stat() # vizualize gap statistic for given clustering
+
+```{r gap_stat_viz}
+fviz_gap_stat(gap_stat)
+```
+
+Analyzing the above three methods, we see that elbow method tells us to increase the number of clusters if possible, but the marginal utility of doing so decreases after k=5 or so. Silhoutte method tells us that k=2 is the best followed by k=4, and the gap statistics method tells us that k=4 is optimal. So, we will continue with k=4.
+
+Now we can print out the final clustering, and visualize it:
+
+```{r kmeans_final}
+final <- kmeans(df, 4, nstart = 25)
+print(final)
+```
+
+```{r kmeans_final_viz}
+fviz_cluster(final, data = df)
+```
+
+We can also assign the given clusters to the states in our original data set, and try to come up with descriptive statistics that can highlight the differences:
+
+```{r kmeans_desc}
+USArrests %>%
+  mutate(Cluster = final$cluster) %>%
+  group_by(Cluster) %>%
+  summarise_all("mean")
+```
+
